@@ -41,6 +41,7 @@
   <ItemGroup>
     <Compile Include="BootstrapperHelper.cs" />
     <Compile Include="DownloadArguments.cs" />
+    <Compile Include="FileShareDownloadStrategy.cs" />
     <Compile Include="GitHubDownloadStrategy.cs" />
     <Compile Include="IDownloadStrategy.cs" />
     <Compile Include="NugetDownloadStrategy.cs" />

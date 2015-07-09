@@ -8,6 +8,7 @@ namespace Paket.Bootstrapper
 {
     class Program
     {
+        const string UseFolderArgs = "--folder";
         const string PreferNugetCommandArg = "--prefer-nuget";
         const string PrereleaseCommandArg = "prerelease";
         const string PaketVersionEnv = "PAKET.VERSION";
@@ -120,9 +121,16 @@ namespace Paket.Bootstrapper
         {
             var gitHubDownloadStrategy = new GitHubDownloadStrategy(BootstrapperHelper.PrepareWebClient, BootstrapperHelper.PrepareWebRequest, BootstrapperHelper.GetDefaultWebProxyFor);
             var nugetDownloadStrategy = new NugetDownloadStrategy(BootstrapperHelper.PrepareWebClient, BootstrapperHelper.GetDefaultWebProxyFor, dlArgs.Folder);
+            var fileShareStrategy = new FileShareDownloadStrategy(dlArgs.DownloadFolder);
 
             IDownloadStrategy effectiveStrategy;
-            if (preferNuget)
+            if (!string.IsNullOrEmpty(dlArgs.DownloadFolder))
+            {
+                effectiveStrategy = fileShareStrategy;
+                fileShareStrategy.FallbackStrategy = nugetDownloadStrategy;
+                nugetDownloadStrategy.FallbackStrategy = gitHubDownloadStrategy;
+            }
+            else if (preferNuget)
             {
                 effectiveStrategy = nugetDownloadStrategy;
                 nugetDownloadStrategy.FallbackStrategy = gitHubDownloadStrategy;
@@ -142,6 +150,7 @@ namespace Paket.Bootstrapper
 
             var latestVersion = Environment.GetEnvironmentVariable(PaketVersionEnv) ?? String.Empty;
             var ignorePrerelease = true;
+            var downloadFolder = string.Empty;
             bool doSelfUpdate = false;
             var commandArgs = args;
 
@@ -150,8 +159,23 @@ namespace Paket.Bootstrapper
                 commandArgs = commandArgs.Where(x => x != SelfUpdateCommandArg).ToArray();
                 doSelfUpdate = true;
             }
+
+            if (commandArgs.Contains(UseFolderArgs))
+            {
+                var argIndex = Array.IndexOf(commandArgs, UseFolderArgs);
+                if (commandArgs.Length >= argIndex)
+                {
+                    downloadFolder = commandArgs[argIndex + 1];
+                    if (!silent)
+                        Console.WriteLine("Using requested download folder of {0}", downloadFolder);
+                }
+                commandArgs = commandArgs.Except(new[] { commandArgs[argIndex], downloadFolder }).ToArray();
+            }
+
             if (commandArgs.Length >= 1)
             {
+                
+
                 if (commandArgs[0] == PrereleaseCommandArg)
                 {
                     ignorePrerelease = false;
@@ -183,7 +207,7 @@ namespace Paket.Bootstrapper
             }
 
 
-            return new DownloadArguments(latestVersion, ignorePrerelease, folder, target, doSelfUpdate);
+            return new DownloadArguments(latestVersion, ignorePrerelease, folder, target, doSelfUpdate, downloadFolder);
         }
     }
 }

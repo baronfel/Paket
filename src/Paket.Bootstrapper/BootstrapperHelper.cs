@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Reflection;
 
 namespace Paket.Bootstrapper
 {
@@ -79,6 +80,24 @@ namespace Paket.Bootstrapper
             };
         }
 
+        internal static bool IsLatestVersion(string latestVersion, bool silent)
+        {
+            var exePath = GetExePath();
+            var localVersion = GetLocalFileVersion(exePath);
+            if (localVersion.StartsWith(latestVersion))
+            {
+                if (!silent)
+                    Console.WriteLine("Bootstrapper is up to date. Nothing to do.");
+                return true;
+            }
+            return false;
+        }
+
+        internal static string GetExePath()
+        {
+            return Assembly.GetExecutingAssembly().Location;
+        }
+
         internal static void FileMove(string oldPath, string newPath)
         {
             try
@@ -94,6 +113,25 @@ namespace Paket.Bootstrapper
             }
 
             File.Move(oldPath, newPath);
+        }
+
+        internal static void FileSwap(string oldFilePath, string newFilePath, bool silent)
+        {
+            var randomPath = Path.GetTempFileName();
+            try
+            {
+                FileMove(oldFilePath, randomPath);
+                FileMove(newFilePath, oldFilePath);
+                if (!silent)
+                    Console.WriteLine("Successfully swapped the old file for the new file.");
+            }
+            catch (Exception)
+            {
+                if (!silent)
+                    Console.WriteLine("File swap failed. Resetting to the previous version.");
+                FileMove(randomPath, oldFilePath);
+                throw;
+            }
         }
     }
 }

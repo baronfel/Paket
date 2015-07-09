@@ -135,15 +135,10 @@ namespace Paket.Bootstrapper
 
         public void SelfUpdate(string latestVersion, bool silent)
         {
-            var executingAssembly = Assembly.GetExecutingAssembly();
-            string target = executingAssembly.Location;
-            var localVersion = BootstrapperHelper.GetLocalFileVersion(target);
-            if (localVersion.StartsWith(latestVersion))
-            {
-                if (!silent)
-                    Console.WriteLine("Bootstrapper is up to date. Nothing to do.");
+            if (BootstrapperHelper.IsLatestVersion(latestVersion, silent))
                 return;
-            }
+
+            var target = BootstrapperHelper.GetExePath();
             var apiHelper = new NugetApiHelper(PaketBootstrapperNugetPackageName);
 
             const string paketNupkgFile = "paket.bootstrapper.latest.nupkg";
@@ -171,21 +166,8 @@ namespace Paket.Bootstrapper
             ZipFile.ExtractToDirectory(paketPackageFile, randomFullPath);
 
             var paketSourceFile = Path.Combine(randomFullPath, "Tools", "Paket.Bootstrapper.exe");
-            var renamedPath = Path.GetTempFileName();
-            try
-            {
-                BootstrapperHelper.FileMove(target, renamedPath);
-                BootstrapperHelper.FileMove(paketSourceFile, target);
-                if (!silent)
-                    Console.WriteLine("Self update of bootstrapper was successful.");
-            }
-            catch (Exception)
-            {
-                if (!silent)
-                    Console.WriteLine("Self update failed. Resetting bootstrapper.");
-                BootstrapperHelper.FileMove(renamedPath, target);
-                throw;
-            }
+            
+            BootstrapperHelper.FileSwap(target, paketSourceFile, silent);
             Directory.Delete(randomFullPath, true);
         }
 

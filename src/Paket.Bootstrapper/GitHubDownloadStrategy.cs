@@ -75,23 +75,16 @@ namespace Paket.Bootstrapper
 
         public void SelfUpdate(string latestVersion, bool silent)
         {
-            var executingAssembly = Assembly.GetExecutingAssembly();
-            string exePath = executingAssembly.Location;
-            var localVersion = BootstrapperHelper.GetLocalFileVersion(exePath);
-            if (localVersion.StartsWith(latestVersion))
-            {
-                if (!silent)
-                    Console.WriteLine("Bootstrapper is up to date. Nothing to do.");
+            if (BootstrapperHelper.IsLatestVersion(latestVersion, silent))
                 return;
-            }
 
-            var url = String.Format("https://github.com/fsprojects/Paket/releases/download/{0}/paket.bootstrapper.exe", latestVersion);
+            var exePath = BootstrapperHelper.GetExePath();
+            var url = string.Format("https://github.com/fsprojects/Paket/releases/download/{0}/paket.bootstrapper.exe", latestVersion);
             if (!silent)
                 Console.WriteLine("Starting download of bootstrapper from {0}", url);
 
             var request = PrepareWebRequest(url);
 
-            string renamedPath = Path.GetTempFileName();
             string tmpDownloadPath = Path.GetTempFileName();
 
             using (var httpResponse = (HttpWebResponse)request.GetResponse())
@@ -101,20 +94,7 @@ namespace Paket.Bootstrapper
                     httpResponseStream.CopyTo(toStream);
                 }
             }
-            try
-            {
-                BootstrapperHelper.FileMove(exePath, renamedPath);
-                BootstrapperHelper.FileMove(tmpDownloadPath, exePath);
-                if (!silent)
-                    Console.WriteLine("Self update of bootstrapper was successful.");
-            }
-            catch (Exception)
-            {
-                if (!silent)
-                    Console.WriteLine("Self update failed. Resetting bootstrapper.");
-                BootstrapperHelper.FileMove(renamedPath, exePath);
-                throw;
-            }
+            BootstrapperHelper.FileSwap(exePath, tmpDownloadPath, silent);
         }
 
     }
