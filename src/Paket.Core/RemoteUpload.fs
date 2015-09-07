@@ -30,7 +30,7 @@ type System.Net.WebClient with
         ()
 
 
-let GetUrlWithEndpoint (url: string option) (endPoint: string option) =
+let GetUrlWithEndpoint (url: string option) (defaultUrl : string) (endPoint: string option) (defaultEndpoint :string) =
     let (|UrlWithEndpoint|_|) url = 
         match url with
         | Some url when not (String.IsNullOrEmpty(Uri(url).AbsolutePath.TrimStart('/'))) -> Some(Uri(url)) 
@@ -41,10 +41,9 @@ let GetUrlWithEndpoint (url: string option) (endPoint: string option) =
         | Some url -> Uri(url.TrimEnd('/') + "/") |> Some
         | _        -> None
     
-    let defaultEndpoint = "/api/v2/package" 
     let urlWithEndpoint = 
         match (url, endPoint) with
-        | None                   , _                   -> Uri(Uri("https://nuget.org"), defaultEndpoint)
+        | None                   , _                   -> Uri(Uri(defaultUrl), defaultEndpoint)
         | IsUrl baseUrl          , Some customEndpoint -> Uri(baseUrl, customEndpoint.TrimStart('/'))
         | UrlWithEndpoint baseUrl, _                   -> baseUrl
         | IsUrl baseUrl          , None                -> Uri(baseUrl, defaultEndpoint)
@@ -52,23 +51,30 @@ let GetUrlWithEndpoint (url: string option) (endPoint: string option) =
     urlWithEndpoint.ToString ()
 
   
-let Push maxTrials url apiKey packageFileName =
-    let rec push trial =
-        tracefn "Pushing package %s to %s - trial %d" packageFileName url trial
+let Push maxTrials nugetUrl symbolUrl apiKey (packageFileName : string) =
+    let symbolPkg (nuget :string) = 
+        nuget.Split([|".nupkg"|], StringSplitOptions.RemoveEmptyEntries).[0] + ".symbols.nupkg" 
+
+    let rec push file url trial =
+        tracefn "Pushing package %s to %s - trial %d" packageFileName nugetUrl trial
         try
+            ignore()
             let client = Utils.createWebClient(url, None)
             client.Headers.Add("X-NuGet-ApiKey", apiKey)
 
-            client.UploadFileAsMultipart (new Uri(url)) packageFileName
+            client.UploadFileAsMultipart (new Uri(url)) file
             |> ignore
-
             tracefn "Pushing %s complete." packageFileName
         with
         | exn when trial = 1 && exn.Message.Contains("(409)") ->
-            failwithf "Package %s already exists." packageFileName
+            failwithf "Package %s already exists." file
         | exn when trial < maxTrials ->            
             if exn.Message.Contains("(409)") |> not then // exclude conflicts
-                traceWarnfn "Could not push %s: %s" packageFileName exn.Message
-                push (trial + 1)
+                traceWarnfn "Could not push %s: %s" file exn.Message
+                push url file (trial + 1)
 
-    push 1 
+    push packageFileName nugetUrl 1 
+    
+    let symbolPackageName = packageFileName |> symbolPkg
+    if File.Exists symbolPackageName then
+        push symbolPackageName symbolUrl  1

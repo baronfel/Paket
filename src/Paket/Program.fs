@@ -249,7 +249,9 @@ let push (results : ParseResults<_>) =
     let fileName = results.GetResult <@ PushArgs.FileName @>
     Dependencies.Push(fileName, ?url = results.TryGetResult <@ PushArgs.Url @>,
                       ?endPoint = results.TryGetResult <@ PushArgs.EndPoint @>,
-                      ?apiKey = results.TryGetResult <@ PushArgs.ApiKey @>)
+                      ?apiKey = results.TryGetResult <@ PushArgs.ApiKey @>,
+                      ?symbolUrl = results.TryGetResult <@ PushArgs.SymbolUrl @>,
+                      ?symbolEndpoint = results.TryGetResult <@ PushArgs.SymbolEndpoint @>)
 
 let main() =
     use consoleTrace = Logging.event.Publish |> Observable.subscribe Logging.traceToConsole

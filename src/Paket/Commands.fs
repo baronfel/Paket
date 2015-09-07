@@ -270,6 +270,8 @@ type PushArgs =
     | [<CustomCommandLine("file")>][<Mandatory>] FileName of string
     | [<CustomCommandLine("apikey")>] ApiKey of string
     | [<CustomCommandLine("endpoint")>] EndPoint of string
+    | [<CustomCommandLine("symbolUrl")>] SymbolUrl of string
+    | [<CustomCommandLine("symbolEndpoint")>] SymbolEndpoint of string
 with
     interface IArgParserTemplate with
         member this.Usage =
@@ -278,6 +280,8 @@ with
             | FileName(_) -> "Path to the package."
             | ApiKey(_) -> "Optionally specify your API key on the command line. Otherwise uses the value of the `nugetkey` environment variable."
             | EndPoint(_) -> "Optionally specify a custom api endpoint to push to. Defaults to `/api/v2/package`."
+            | SymbolUrl(_) -> "Optionally specify a feed to push a symbols package to, if one is present.  Defaults to http://nuget.gw.symbolsource.org, which is the default nuget symbol source."
+            | SymbolEndpoint(_) -> "Optionally specify a custom api endpoint to push a symbols package to, if one is present.  Defaults to /Public/NuGet, which is the default nuget symbol feed."
 
 let cmdLineSyntax (parser:ArgumentParser<_>) commandName =
     "paket " + commandName + " " + parser.PrintCommandLineSyntax()

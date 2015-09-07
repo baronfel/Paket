@@ -13,43 +13,43 @@ let customHostWithEndpoint = (customHost + customEndpoint)
 
 [<Test>]
 let ``default result is nuget host with default endpoint`` () =
-    GetUrlWithEndpoint None None 
+    GetUrlWithEndpoint None nugetUrl None defaultEndpoint
     |> shouldEqual (nugetUrl + defaultEndpoint)
 
 [<Test>]
 let ``no host with custom endpoint yields nuget host with default endpoint`` () =
-    GetUrlWithEndpoint None (Some customEndpoint) 
+    GetUrlWithEndpoint None nugetUrl (Some customEndpoint) defaultEndpoint
     |> shouldEqual (nugetUrl + defaultEndpoint)
 
 [<Test>]
 let ``custom host with no endpoint yields custom host with default endpoint`` () =
-    GetUrlWithEndpoint (Some customHost) None 
+    GetUrlWithEndpoint (Some customHost) nugetUrl None defaultEndpoint
     |> shouldEqual (customHost + defaultEndpoint) 
 
 [<Test>]
 let ``custom host with custom endpoint yields custom host with custom endpoint`` () =
-    GetUrlWithEndpoint (Some customHost) (Some customEndpoint) 
+    GetUrlWithEndpoint (Some customHost) nugetUrl (Some customEndpoint) defaultEndpoint
     |> shouldEqual (customHost + customEndpoint)
 
 [<Test>]
 let ``custom host that includes endpoint and no custom enpoint does not append default endpoint`` () =
-    GetUrlWithEndpoint (Some customHostWithEndpoint) None 
+    GetUrlWithEndpoint (Some customHostWithEndpoint) nugetUrl None defaultEndpoint
     |> shouldEqual customHostWithEndpoint
 
 [<Test>]
 let ``custom host that includes endpoint and custom endpoint yields host + customendpoint`` () =
-    GetUrlWithEndpoint (Some customHostWithEndpoint) (Some customEndpoint)
+    GetUrlWithEndpoint (Some customHostWithEndpoint) nugetUrl (Some customEndpoint) defaultEndpoint
     |> shouldEqual (customHostWithEndpoint + customEndpoint)
 
 [<Test>]
 let ``can combine host and endpoint with missing leading slash on endpoint`` () =
     let noSlashes = "my/feed"
-    GetUrlWithEndpoint (Some customHost) (Some noSlashes) 
+    GetUrlWithEndpoint (Some customHost) nugetUrl (Some noSlashes) defaultEndpoint
     |> shouldEqual (customHost + "/" + noSlashes)
 
 [<Test>]
 let ``can combine host and endpoint with leading slash on endpoint and trailing slash on host`` () =
     let slashyHost = customHost + "/"
-    GetUrlWithEndpoint (Some slashyHost) (Some customEndpoint) 
+    GetUrlWithEndpoint (Some slashyHost) nugetUrl (Some customEndpoint) defaultEndpoint
     |> shouldEqual (customHost + customEndpoint)
 

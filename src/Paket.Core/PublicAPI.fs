@@ -378,10 +378,12 @@ type Dependencies(dependenciesFileName: string) =
         PackageProcess.Pack(workingDir, dependenciesFile, outputPath, buildConfig, version, releaseNotes, templateFile, lockDependencies)
 
     /// Pushes a nupkg file.
-    static member Push(packageFileName, ?url, ?apiKey, (?endPoint: string), ?maxTrials) =
-        let urlWithEndpoint = RemoteUpload.GetUrlWithEndpoint url endPoint
+    static member Push(packageFileName, ?url, ?apiKey, (?endPoint: string), ?maxTrials, ?symbolUrl, ?symbolEndpoint) =
+        let nugetUrlWithEndpoint = RemoteUpload.GetUrlWithEndpoint url "https://nuget.org" endPoint "/api/v2/package"
+        let symbolsUrlWithEndpoint = RemoteUpload.GetUrlWithEndpoint symbolUrl "http://nuget.gw.symbolsource.org" symbolEndpoint "/Public/NuGet"
+
         let apiKey = defaultArg apiKey (Environment.GetEnvironmentVariable("nugetkey"))
         if String.IsNullOrEmpty apiKey then
             failwithf "Could not push package %s. Please specify a NuGet API key via environment variable \"nugetkey\"." packageFileName
         let maxTrials = defaultArg maxTrials 5
-        RemoteUpload.Push maxTrials urlWithEndpoint apiKey packageFileName
+        RemoteUpload.Push maxTrials nugetUrlWithEndpoint symbolsUrlWithEndpoint apiKey packageFileName

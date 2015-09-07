@@ -10,7 +10,7 @@ namespace Paket.Bootstrapper
     {
         const string PaketBootstrapperUserAgent = "Paket.Bootstrapper";
 
-        internal static string GetLocalFileVersion(string target)
+        internal static string  GetLocalFileVersion(string target)
         {
             if (!File.Exists(target)) return "";
 
