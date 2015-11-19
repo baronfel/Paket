@@ -163,7 +163,7 @@ namespace Paket.Bootstrapper
                     ignorePrerelease = false;
                     latestVersion = String.Empty;
                     if (!silent)
-                        Console.WriteLine("Prerelease requested. Looking for latest prerelease.");
+                        Console.WriteLine("Checking Paket version (downloading latest prerelease)...");
                 }
                 else
                 {
@@ -171,9 +171,9 @@ namespace Paket.Bootstrapper
                     if (!silent)
                     {
                         if (!String.IsNullOrWhiteSpace(latestVersion))
-                            Console.WriteLine("Version {0} requested.", latestVersion);
+                            Console.WriteLine("Checking Paket version (downloading version {0}})...", latestVersion);
                         else
-                            Console.WriteLine("No version specified. Downloading latest stable.");
+                            Console.WriteLine("Checking Paket version (downloading latest stable)...");
                     }
                 }
             }
@@ -182,9 +182,9 @@ namespace Paket.Bootstrapper
                 if (!silent)
                 {
                     if (!String.IsNullOrWhiteSpace(latestVersion))
-                        Console.WriteLine("Version {0} requested.", latestVersion);
+                        Console.WriteLine("Checking Paket version (downloading version {0}})...", latestVersion);
                     else
-                        Console.WriteLine("No version specified. Downloading latest stable.");
+                        Console.WriteLine("Checking Paket version (downloading latest stable)...");
                 }
             }
 
