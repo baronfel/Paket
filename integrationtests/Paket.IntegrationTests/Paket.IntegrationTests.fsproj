@@ -115,6 +115,7 @@
     <Compile Include="PaketCoreSpecs.fs" />
     <Compile Include="BasicResolverSpecs.fs" />
     <Compile Include="ConvertFromNuGetSpecs.fs" />
+    <Compile Include="ConvertFromNuGetNuspecSpecs.fs" />    
     <Compile Include="SemVerUpdateSpecs.fs" />
     <Compile Include="ResolverSkipsConflictsFastSpecs.fs" />
     <Compile Include="AutocompleteSpecs.fs" />
