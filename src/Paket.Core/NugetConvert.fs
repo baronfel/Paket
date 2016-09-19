@@ -524,7 +524,7 @@ let convertProjects nugetEnv =
         project.RemoveNuGetPackageImportStamp()
         yield project, convertPackagesConfigToReferencesFile project.FileName packagesConfig]
 
-let convertTemplates (nuspecs : (FileInfo * NuspecFile) list)= 
+let convertTemplates (projects : ProjectFile list) (nuspecs : (FileInfo * NuspecFile) list) = 
     let toTemplateCore (spec : NuspecFile) : CompleteCoreInfo = 
         { Id = spec.Id 
           Version = Some spec.Version
@@ -559,14 +559,19 @@ let convertTemplates (nuspecs : (FileInfo * NuspecFile) list)=
           FilesExcluded = spec.Files |> List.choose (fun f -> f.Exclude)
           IncludePdbs = false
           IncludeReferencedProjects = false } : OptionalPackagingInfo
-
+    let projectDirs = projects |> List.map (fun p -> Path.GetDirectoryName p.FileName)
     [for file,spec in nuspecs do
-        yield { FileName = file.FullName; Contents = CompleteInfo (toTemplateCore spec, toPackaging spec) } ]
+        let fileName = 
+            if projectDirs |> List.exists ((=) file.DirectoryName) 
+            then "paket.template" // use default paket.template name for nuspecs that are in a project directory alongside
+            else file.Name.Replace(".nuspec", ".paket.template") // else name must match project and have paket.template suffixed
+        yield { FileName = Path.Combine( file.DirectoryName, fileName)
+                Contents = CompleteInfo (toTemplateCore spec, toPackaging spec) } ]
 
 let createPaketEnv rootDirectory nugetEnv credsMirationMode = trial {
     let! depFile = createDependenciesFileR rootDirectory nugetEnv credsMirationMode
-    let convertedFiles = convertProjects nugetEnv // DESTRUCTIVE at this point
-    let convertedTemplates = convertTemplates nugetEnv.NuGetNuspecs
+    let convertedFiles = convertProjects nugetEnv
+    let convertedTemplates = convertTemplates (convertedFiles |> List.map fst) nugetEnv.NuGetNuspecs
     return PaketEnv.create rootDirectory depFile None convertedFiles convertedTemplates
 }
 
@@ -611,6 +616,7 @@ let replaceNuGetWithPaket initAutoRestore installAfter result =
     result.NuGetEnv.NuGetConfigFiles |> List.iter remove
     result.NuGetEnv.NuGetProjectFiles |> List.map (fun (_,n) -> n.File) |> List.iter remove
     result.NuGetEnv.NuGetTargets |> Option.iter remove
+    result.NuGetEnv.NuGetNuspecs |> List.iter (fst >> remove)
     result.NuGetEnv.NuGetExe 
     |> Option.iter 
             (fun nugetExe -> 
