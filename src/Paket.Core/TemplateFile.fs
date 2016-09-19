@@ -516,3 +516,62 @@ module internal TemplateFile =
              name <> "packages" && name <> "paket-files")
         |> Seq.collect findTemplates
         |> Seq.append (Directory.EnumerateFiles(root, "*" + Constants.TemplateFile, SearchOption.TopDirectoryOnly))
+
+    let Save (templateFile : TemplateFile) = 
+        let projCoreLines (core : ProjectCoreInfo) = 
+            [| yield "type project"
+               match core.Id with | None -> () | Some d -> yield sprintf "id %s" d
+               match core.Version with | None -> () | Some v -> yield sprintf "version %O" v
+               match core.Authors with | None -> () | Some a -> yield sprintf "authors %s" (String.Join(",", a |> Seq.ofList))
+               match core.Description with | None -> () | Some d -> yield sprintf "description %s" d |]
+        let completeCoreLines (core: CompleteCoreInfo) = 
+            [| yield "type project"
+               yield sprintf "id %s" core.Id
+               match core.Version with | None -> () | Some v -> yield sprintf "version %O" v
+               yield sprintf "authors %s" (String.Join(",", core.Authors |> Seq.ofList))
+               yield sprintf "description %s" core.Description |]
+        
+        let packageLines (opts : OptionalPackagingInfo) = 
+            [| match opts.Title with | None -> () | Some t -> yield sprintf "title %s" t
+               match opts.Owners with | [] -> () | os -> yield sprintf "owners %s" (String.Join(",", os |> Seq.ofList))
+               match opts.ReleaseNotes with | None -> () | Some r -> yield sprintf "releaseNotes %s" r
+               match opts.Summary with | None -> () | Some s -> yield sprintf "summary %s" s
+               match opts.Language with | None -> () | Some l -> yield sprintf "language %s" l
+               match opts.ProjectUrl with | None -> () | Some pu -> yield sprintf "projectUrl %s" pu
+               match opts.IconUrl with | None -> () | Some iu -> yield sprintf "iconUrl %s" iu
+               match opts.LicenseUrl with | None -> () | Some lu -> yield sprintf "licenseUrl %s" lu
+               match opts.Copyright with | None -> () | Some c -> yield sprintf "copyright %s" c
+               yield sprintf "requireLicenseAcceptance %b" opts.RequireLicenseAcceptance
+               match opts.Tags with | [] -> () | tags -> yield sprintf "tags %s" (String.Join(",", tags |> Seq.ofList))
+               yield sprintf "developmentDependency %b" opts.DevelopmentDependency 
+               yield sprintf "include-referenced-projects %b" opts.IncludeReferencedProjects
+               yield sprintf "include-pdbs %b" opts.IncludePdbs
+               match opts.References with
+               | [] -> ()
+               | xs -> yield "references"; yield! xs |> List.map (sprintf "\t%s")
+               match opts.FrameworkAssemblyReferences with
+               | [] -> ()
+               | xs -> yield "frameworkAssemblies"; yield! xs |> List.map (sprintf "\t%s")
+               match opts.Dependencies with
+               | [] -> ()
+               | xs -> yield "dependencies"; yield! xs |> List.map (fun (name,req) -> sprintf "\t%O %O" name req)
+               match opts.ExcludedDependencies |> Set.isEmpty with
+               | true -> ()
+               | false -> yield "excludeddependencies"; yield! opts.ExcludedDependencies |> Set.toList |> List.map (sprintf "\t%O")
+               match opts.ExcludedGroups |> Set.isEmpty with
+               | true -> ()
+               | false -> yield "excludedgroups"; yield! opts.ExcludedGroups |> Set.toList |> List.map (sprintf "\t%O")
+               match opts.Files, opts.FilesExcluded with
+               | [], [] -> ()
+               | incs, exs -> 
+                    yield "files";
+                    yield! incs |> List.map (fun (inc,tar) -> sprintf "\t%s ==> %s" inc tar)
+                    yield! exs |> List.map (sprintf "\t!%s") |]
+        
+        let lines = 
+            match templateFile.Contents with
+            | ProjectInfo (core,packaging) -> Array.append (projCoreLines core) (packageLines packaging)
+            | CompleteInfo(core,packaging) -> Array.append (completeCoreLines core) (packageLines packaging)
+        File.WriteAllLines(templateFile.FileName, lines)
+
+            

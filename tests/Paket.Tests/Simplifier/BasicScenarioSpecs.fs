@@ -44,7 +44,7 @@ let projects1 = [
 
 [<Test>]
 let ``should remove one level deep transitive dependencies from dep and ref files``() = 
-    let before = PaketEnv.create dummyDir depFile1 lockFile1 projects1
+    let before = PaketEnv.create dummyDir depFile1 lockFile1 projects1 []
     
     match Simplifier.simplify false before with
     | Chessie.ErrorHandling.Bad(msgs) -> 
@@ -87,7 +87,7 @@ let projects2 = [
 
 [<Test>]
 let ``should remove all transitive dependencies from dep file recursively``() =
-    let before = PaketEnv.create dummyDir depFile2 lockFile2 projects2
+    let before = PaketEnv.create dummyDir depFile2 lockFile2 projects2 []
     
     match Simplifier.simplify false before with
     | Chessie.ErrorHandling.Bad(msgs) -> 
@@ -165,7 +165,7 @@ let projects3 = [
 
 [<Test>]
 let ``should remove all transitive dependencies from dep file with multiple groups``() =
-    let before = PaketEnv.create dummyDir depFile3 lockFile3 projects3
+    let before = PaketEnv.create dummyDir depFile3 lockFile3 projects3 []
     
     match Simplifier.simplify false before with
     | Chessie.ErrorHandling.Bad(msgs) -> 

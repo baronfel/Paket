@@ -627,6 +627,7 @@ let replaceNuGetWithPaket initAutoRestore installAfter result =
     result.PaketEnv.Projects |> List.iter (fun (project, referencesFile) -> 
                                                 project.Save(true)
                                                 referencesFile.Save())
+    result.PaketEnv.TemplateFiles |> List.iter TemplateFile.Save
     result.SolutionFiles |> Array.iter (fun s -> s.Save())
 
     let autoVSPackageRestore = 
