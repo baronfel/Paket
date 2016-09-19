@@ -11,16 +11,18 @@ type PaketEnv = {
     DependenciesFile : DependenciesFile
     LockFile : option<LockFile>
     Projects : list<ProjectFile * ReferencesFile>
+    TemplateFiles : TemplateFile list
 }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module PaketEnv = 
 
-    let create root dependenciesFile lockFile projects = 
+    let create root dependenciesFile lockFile projects templateFiles = 
         { RootDirectory = root
           DependenciesFile = dependenciesFile
           LockFile = lockFile
-          Projects = projects }
+          Projects = projects 
+          TemplateFiles = templateFiles }
 
     let fromRootDirectory (directory : DirectoryInfo) = trial {
         if not directory.Exists then 
@@ -46,9 +48,8 @@ module PaketEnv =
                     with _ ->
                         fail (LockFileParseError fi)
 
-            let! projects = InstallProcess.findAllReferencesFiles(directory.FullName)
-
-            return create directory dependenciesFile lockFile projects
+            let! projects = InstallProcess.findAllReferencesFiles(directory.FullName) 
+            return create directory dependenciesFile lockFile projects []
     }
 
     let locatePaketRootDirectory (directory : DirectoryInfo) = 

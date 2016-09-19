@@ -134,21 +134,204 @@ type NugetConfig =
             | Some value -> bool.Parse(value)
             | None -> nugetConfig.PackageRestoreAutomatic }
 
+type NuspecDependency = {
+    Id : string
+    Version : VersionRequirement
+}
+
+type FileIncludes = {
+    Source : string
+    Target : string option
+    Exclude : string option
+}
+
+
+type NuspecFile = {
+    Id : string
+    Version : SemVerInfo
+    Authors : string list
+    Owners : string list
+    Title : string
+    Description : string
+    ReleaseNotes : string option
+    Summary : string option
+    Language : string option
+    LicenseUrl : string option
+    ProjectUrl : string option
+    IconUrl : string option
+    Copyright : string option
+    // for these two, None as the key means globally accessible
+    Dependencies: Map<FrameworkIdentifier option, NuspecDependency list>
+    References : Map<FrameworkIdentifier option, string list> // references are just dll files
+    FrameworkAssemblies : Map<FrameworkIdentifier option, string list> // assys are just assembly name strings grouped by TFM
+    Tags : string list
+    Files : FileIncludes list
+    RequireLicenseAcceptance : bool
+    DevelopmentDependency : bool
+    //TODO: content files support
+    //TODO: developmentDependency support
+}
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module NuspecFile = 
+    let createDetailsR (fileInfo : FileInfo) : Result<NuspecFile, string>= 
+        let getNodeOrFail node xml = 
+            match getNode node xml with
+            | Some thing -> ok thing
+            | None -> fail (sprintf "no %s node in nuspec %s" node fileInfo.FullName)
+
+        let getNodeValueR node xml = getNodeOrFail node xml |> lift getValue
+        let getNodeValueO node xml = getNode node xml |> Option.map getValue
+        let optionToResult msg option = 
+            match option with
+            | Some o -> ok o
+            | None -> fail msg
+
+        let tryRead () = 
+            let x = XmlDocument()
+            use f = File.OpenRead fileInfo.FullName
+            x.Load(f)
+            x
+
+        let readFrameworkAttr node = 
+            match getAttribute "targetFramework" node with
+                | None -> ok None
+                | Some ident -> 
+                        match FrameworkDetection.Extract ident with
+                        | Some ident -> ok <| Some ident
+                        | None -> fail <| sprintf "unable to parse frameworkidentifier %s" ident
+
+        /// childNodeName -> childCreateFn -> groupNode -> childNode list
+        let readChildrenFromGroup childNodeName makeChildFromNodeF group = trial {
+            let! attr = readFrameworkAttr group
+            let! children = getNodes childNodeName group |> List.map makeChildFromNodeF |> collect
+            return attr,children
+        }
+            
+
+        let readDependencyGroups dependenciesNode =
+            let makeDep (depNode : XmlNode) = 
+                match getAttribute "id" depNode, getAttribute "version" depNode with
+                | Some i, Some v -> ok <| {NuspecDependency.Id = i; NuspecDependency.Version = VersionRequirement.Parse v }
+                | _ -> fail "missing required dependency node information"
+
+            let grouplessDeps, groupedDeps = getNodes "dependency" dependenciesNode, getNodes "group" dependenciesNode
+
+            trial {
+                let! grouplessParsed = grouplessDeps |> List.map makeDep |> collect
+                let! groupedParsed = groupedDeps |> List.map (readChildrenFromGroup "dependency" makeDep) |> collect |> lift Map.ofList
+                let updated = 
+                    match groupedParsed |> Map.tryFind None with
+                    | Some items -> groupedParsed |> Map.add None (grouplessParsed @ items)
+                    | None -> groupedParsed |> Map.add None grouplessParsed
+                return updated
+            }
+
+        let readReferenceGroups referencesNode = 
+            let makeReference = getAttribute "file" >> optionToResult "missing file attribute in reference node"              
+            let groupless, grouped = getNodes "reference" referencesNode, getNodes "group" referencesNode
+
+            trial {
+                let! grouplessParsed = groupless |> List.map makeReference |> collect
+                let! groupParsed = grouped |> List.map (readChildrenFromGroup "reference" makeReference) |> collect |> lift Map.ofList
+                let updated = 
+                    match groupParsed |> Map.tryFind None with
+                    | Some items -> groupParsed |> Map.add None (grouplessParsed @ items)
+                    | None -> groupParsed |> Map.add None grouplessParsed
+                return updated
+            }
+
+        let readFrameworkAssemblyGroups assyNode =
+            let makeAssyRef assyNode = trial {
+                let! frameworkIdent = readFrameworkAttr assyNode
+                let! assyName = getAttribute "assemblyName" assyNode |> optionToResult "missing assemblyName in frameworkAssembly reference"
+                return frameworkIdent,assyName
+            }
+
+            readChildrenFromGroup "frameworkAssembly" makeAssyRef assyNode
+            |> lift (fun (_,children) -> children |> List.groupBy fst) // there won't be a TFI on the root assy node
+            |> lift (List.map (fun (key, values) -> key, values |> List.map snd)) // pull out the grouper and the assyNames
+            |> lift (Map.ofList)
+                
+        let readFileIncludes filesNode = 
+            let readFile fileNode = trial {
+                let! src = getAttribute "src" fileNode |> optionToResult "missing src attribute for file spec"
+                let target = getAttribute "target" fileNode
+                let exclude = getAttribute "exclude" fileNode
+                return {Source = src; Target = target; Exclude = exclude}
+            }
+
+            readChildrenFromGroup "file" readFile filesNode
+            |> lift (fun (_,children) -> children)
+            
+        trial {
+            let xml = tryRead ()
+            let! metadata = getNodeOrFail "metadata" xml
+            // required nodes
+            let! packageId = getNodeValueR "id" metadata
+            let! version = getNodeValueR "version" metadata |> lift (SemVer.Parse)
+            let! authors = getNodeValueR "authors" metadata |> lift (String.split [|','|] >> List.ofArray)
+            let! description = getNodeValueR "description" metadata
+
+            // optional nodes
+            let title = defaultArg (getNodeValueO "title" metadata) packageId
+            let owners = defaultArg (getNodeValueO "owners" metadata |> Option.map (String.split [|','|] >> List.ofArray)) []
+            let releaseNotes = getNodeValueO "releaseNotes" metadata
+            let summary = getNodeValueO "summary" metadata
+            let language = getNodeValueO "language" metadata
+            let projectUrl = getNodeValueO "projectUrl" metadata
+            let iconUrl = getNodeValueO "iconUrl" metadata
+            let licenseUrl = getNodeValueO "licenseUrl" metadata
+            let copyright = getNodeValueO "copyright" metadata
+            let! dependencies = defaultArg (getNode "dependencies" metadata |> Option.map readDependencyGroups) (ok Map.empty)
+            let! references = defaultArg (getNode "references" metadata |> Option.map readReferenceGroups) (ok Map.empty)      
+            let! frameworkAssemblies = defaultArg (getNode "frameworkAssemblies" metadata |> Option.map readFrameworkAssemblyGroups) (ok Map.empty)
+            let tags = defaultArg (getNodeValueO "tags" metadata |> Option.map (String.split [|' '|] >> List.ofArray)) List.empty
+            let! files = defaultArg (getNode "files" xml |> Option.map readFileIncludes) (ok List.empty)
+            let licenseAccept = defaultArg (getNodeValueO "requireLicenseAcceptance" metadata |> Option.map bool.Parse) false
+            let devDep = defaultArg (getNodeValueO "developmentDependency" metadata |> Option.map bool.Parse) false
+            return {
+                Id = packageId
+                Version = version
+                Authors = authors
+                Description = description
+                Title = title
+                Owners = owners
+                ReleaseNotes = releaseNotes
+                Summary = summary
+                Language = language
+                ProjectUrl = projectUrl
+                IconUrl = iconUrl
+                LicenseUrl = licenseUrl
+                Copyright = copyright
+                Dependencies = dependencies
+                References = references
+                FrameworkAssemblies = frameworkAssemblies
+                Tags = tags
+                Files = files
+                RequireLicenseAcceptance = licenseAccept
+                DevelopmentDependency = devDep
+            }
+        }
+        
+
 type NugetEnv = 
     { RootDirectory : DirectoryInfo
       NuGetConfig : NugetConfig
       NuGetConfigFiles : list<FileInfo>
       NuGetProjectFiles : list<ProjectFile * NugetPackagesConfig>
+      NuGetNuspecs : list<FileInfo * NuspecFile>
       NuGetTargets : option<FileInfo>
       NuGetExe : option<FileInfo> }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module NugetEnv = 
-    let create rootDirectory configFiles targets exe config packagesFiles = 
+    let create rootDirectory configFiles targets exe config packagesFiles nuspecs = 
         { RootDirectory = rootDirectory
           NuGetConfig = config
           NuGetConfigFiles = configFiles
           NuGetProjectFiles = packagesFiles
+          NuGetNuspecs = nuspecs
           NuGetTargets = targets
           NuGetExe = exe
         }
@@ -187,6 +370,18 @@ module NugetEnv =
         |> Array.map (fun (p,packages) -> readSingle(FileInfo(packages)) |> lift (fun packages -> (p,packages)))
         |> collect
 
+    let readNuspecs (root: DirectoryInfo) (projectFiles : ProjectFile list)  = 
+        [for file in FindAllFiles(root.FullName, "*.nuspec") do
+            match NuspecFile.createDetailsR file with
+            | Ok(nuspec, msgs) -> 
+                msgs |> List.iter trace
+                yield file, nuspec
+            | Bad(errors) -> 
+                traceWarn <| sprintf "couldn't parse nuspec at %s, leaving it in position" file.FullName
+                errors |> List.iter trace ]
+
+
+
     let read (rootDirectory : DirectoryInfo) = trial {
         let configs = FindAllFiles(rootDirectory.FullName, "nuget.config") |> Array.toList
         let targets = FindAllFiles(rootDirectory.FullName, "nuget.targets") |> Array.tryHead
@@ -194,7 +389,9 @@ module NugetEnv =
         let! config = readNugetConfig rootDirectory
         let! packages = readNuGetPackages rootDirectory
 
-        return create rootDirectory configs targets exe config packages
+        let nuspecs = readNuspecs rootDirectory (packages |> List.map fst)
+            
+        return create rootDirectory configs targets exe config packages nuspecs
     }
 
 type ConvertResultR = 
@@ -327,9 +524,50 @@ let convertProjects nugetEnv =
         project.RemoveNuGetPackageImportStamp()
         yield project, convertPackagesConfigToReferencesFile project.FileName packagesConfig]
 
+let convertTemplates (nuspecs : (FileInfo * NuspecFile) list)= 
+    let toTemplateCore (spec : NuspecFile) : CompleteCoreInfo = 
+        { Id = spec.Id 
+          Version = Some spec.Version
+          Authors = spec.Authors
+          Description = spec.Description
+          Symbols = false }
+    let toPackaging (spec : NuspecFile) : OptionalPackagingInfo =
+        { Title = Some spec.Title
+          Tags = spec.Tags
+          Owners = spec.Owners
+          ReleaseNotes = spec.ReleaseNotes
+          Summary = spec.Summary
+          Language = spec.Language
+          ProjectUrl = spec.ProjectUrl
+          IconUrl = spec.IconUrl
+          LicenseUrl = spec.LicenseUrl
+          Copyright = spec.Copyright
+          RequireLicenseAcceptance = spec.RequireLicenseAcceptance
+          DevelopmentDependency = spec.DevelopmentDependency
+          Dependencies = 
+            spec.Dependencies 
+            |> Map.fold (fun deps _ grpDeps -> 
+                                let inDeps (grpDep : NuspecDependency) = deps |> List.exists (fun (dep,_) -> dep = PackageName(grpDep.Id))
+                                let notIn = grpDeps |> List.filter (inDeps >> not)
+                                (notIn |> List.map (fun dep -> PackageName(dep.Id), dep.Version)) @ deps
+                ) []
+          ExcludedDependencies = Set.empty
+          ExcludedGroups = Set.empty
+          References = spec.References |> Map.toList |> List.map snd |> List.concat |> List.distinct
+          FrameworkAssemblyReferences = spec.FrameworkAssemblies |> Map.toList |> List.map snd |> List.concat |> List.distinct
+          Files = spec.Files |> List.map (fun f -> f.Source, defaultArg f.Target "")
+          FilesExcluded = spec.Files |> List.choose (fun f -> f.Exclude)
+          IncludePdbs = false
+          IncludeReferencedProjects = false } : OptionalPackagingInfo
+
+    [for file,spec in nuspecs do
+        yield { FileName = file.FullName; Contents = CompleteInfo (toTemplateCore spec, toPackaging spec) } ]
+
 let createPaketEnv rootDirectory nugetEnv credsMirationMode = trial {
     let! depFile = createDependenciesFileR rootDirectory nugetEnv credsMirationMode
-    return PaketEnv.create rootDirectory depFile None (convertProjects nugetEnv)
+    let convertedFiles = convertProjects nugetEnv // DESTRUCTIVE at this point
+    let convertedTemplates = convertTemplates nugetEnv.NuGetNuspecs
+    return PaketEnv.create rootDirectory depFile None convertedFiles convertedTemplates
 }
 
 let updateSolutions (rootDirectory : DirectoryInfo) = 

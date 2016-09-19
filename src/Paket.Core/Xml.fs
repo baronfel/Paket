@@ -78,6 +78,8 @@ let inline getDescendants name (node:XmlNode) =
 /// [omit]
 let inline getChildNodes (node:XmlNode) = System.Linq.Enumerable.Cast<XmlNode>(node)
 
+/// [omit]
+let inline getValue (node : XmlNode) = node.Value
 
 module Linq =
 
