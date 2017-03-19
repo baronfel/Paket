@@ -65,18 +65,28 @@ let findPackageFolder root (groupName,packageName) (version,settings) =
             failwithf "Package directory for package %O was not found." packageName
 
 
-let contentFileBlackList : list<(FileInfo -> bool)> = [
-    fun f -> f.Name = "_._"
-    fun f -> f.Name.EndsWith ".transform"
-    fun f -> f.Name.EndsWith ".pp"
-    fun f -> f.Name.EndsWith ".tt"
-    fun f -> f.Name.EndsWith ".ttinclude"
-    fun f -> f.Name.EndsWith ".install.xdt"
-    fun f -> f.Name.EndsWith ".uninstall.xdt"
+let blacklistSuffixes = [
+    "_._"
+    ".transform"
+    ".tt"
+    ".ttinclude"
+    ".install.xdt"
+    ".uninstall.xdt"
 ]
+
+type ContentFileType =
+| Blacklisted of FileInfo
+| Transform of source:FileInfo * destinationFileName : string
+| Content of FileInfo
+
+let toContentFileType (file : FileInfo) =
+    if file.Extension = ".pp" then Transform(file, file.Name.TrimEnd([|'.';'p';'p'|]))
+    else if blacklistSuffixes |> List.exists (file.Name.EndsWith) then Blacklisted file
+    else Content file
 
 let processContentFiles root project (usedPackages:Map<_,_>) gitRemoteItems options =
     let contentFiles = System.Collections.Generic.HashSet<_>()
+
     let nuGetFileItems =
         let packageDirectoriesWithContent =
             usedPackages
@@ -94,30 +104,68 @@ let processContentFiles root project (usedPackages:Map<_,_>) gitRemoteItems opti
             |> Seq.toList
 
         let copyContentFiles (project : ProjectFile, packagesWithContent) =
-            let onBlackList (fi : FileInfo) = contentFileBlackList |> List.exists (fun rule -> rule(fi))
+            // given a template file, do some token replacement on properties from the project file and copy the rendered text to the destination File
+            let renderTemplate (template: FileInfo) (target: FileInfo) =
+                // the supported properties to transform.  the full list is located at https://docs.microsoft.com/en-us/nuget/create-packages/source-and-config-file-transformations
+                let propertyMap =
+                    [ "$rootnamespace$", defaultArg (ProjectFile.getProperty "RootNamespace" project) (ProjectFile.nameWithoutExtension project)
+                      "$assemblyName$", defaultArg (ProjectFile.getProperty "AssemblyName" project) (ProjectFile.nameWithoutExtension project) ]
+                    |> Map.ofList
+                let templateContent = File.ReadAllText(template.FullName)
+                let rendered : string = propertyMap |> Map.fold (fun (text: string) (key:string) (value : string) -> text.Replace(key, value)) templateContent
+                File.WriteAllText(target.FullName, rendered)
+                target
 
             let rec copyDirContents (fromDir : DirectoryInfo, contentCopySettings, toDir : Lazy<DirectoryInfo>) =
-                fromDir.GetDirectories() |> Array.toList
-                |> List.collect (fun subDir -> copyDirContents(subDir, contentCopySettings, lazy toDir.Force().CreateSubdirectory(subDir.Name)))
-                |> List.append
-                    (fromDir.GetFiles()
-                        |> Array.toList
-                        |> List.filter (fun file ->
-                            if onBlackList file then false else
-                            if file.Name = "paket.references" then traceWarnfn "You can't use paket.references as a content file in the root of a project. Please take a look at %s" file.FullName; false else true)
-                        |> List.map (fun file ->
+                let childDirFiles =
+                    fromDir.GetDirectories()
+                    |> Array.collect (fun subDir -> copyDirContents(subDir, contentCopySettings, lazy toDir.Force().CreateSubdirectory(subDir.Name)))
+
+                let currentDirFiles =
+                    fromDir.GetFiles()
+                    |> Array.map toContentFileType
+                    // |> Array.map (function
+                    //     | Blacklisted fi ->
+                    //         tracefn "Blacklisted: %s" fi.FullName
+                    //         Blacklisted fi
+                    //     | Content fi ->
+                    //         tracefn "Content: %s" fi.FullName
+                    //         Content fi
+                    //     | Transform(template, destination) ->
+                    //         tracefn "Template: %s -> %s" template.FullName destination
+                    //         Transform(template, destination)
+                    //     )
+                    |> Array.choose (fun file ->
+                        match file with
+                        | Blacklisted _ -> None
+                        | Content file when file.Name = "paket.references" ->
+                            traceWarnfn "You can't use paket.references as a content file in the root of a project. Please take a look at %s" file.FullName
+                            None
+                        | Content file ->
                             let overwrite = contentCopySettings = ContentCopySettings.Overwrite
                             let target = FileInfo(Path.Combine(toDir.Force().FullName, file.Name))
                             contentFiles.Add(target.FullName) |> ignore
-                            if overwrite || not target.Exists then
-                                file.CopyTo(target.FullName, true)
-                            else target))
-                
+                            if overwrite || not target.Exists
+                            then file.CopyTo(target.FullName, true) |> Some
+                            else Some target
+                        | Transform(template, destinationName) ->
+                            let overwrite = contentCopySettings = ContentCopySettings.Overwrite
+                            let target = FileInfo(Path.Combine(toDir.Force().FullName, destinationName))
+                            contentFiles.Add(target.FullName) |> ignore
+                            if overwrite || not target.Exists
+                            then renderTemplate template target |> Some
+                            else Some target
+                    )
+
+                Array.append currentDirFiles childDirFiles
+
 
             packagesWithContent
-            |> List.collect (fun (packageDir,contentCopySettings,contentCopyToOutputSettings) -> 
+            |> List.collect (fun (packageDir,contentCopySettings,contentCopyToOutputSettings) ->
                 copyDirContents (packageDir, contentCopySettings, lazy (DirectoryInfo(Path.GetDirectoryName(project.FileName))))
-                |> List.map (fun x -> x,contentCopySettings,contentCopyToOutputSettings))
+                |> Array.map (fun x -> x,contentCopySettings,contentCopyToOutputSettings)
+                |> Array.toList
+            )
 
         copyContentFiles(project, packageDirectoriesWithContent)
         |> List.map (fun (file,contentCopySettings,contentCopyToOutputSettings) ->
