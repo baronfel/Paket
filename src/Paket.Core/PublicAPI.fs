@@ -883,42 +883,78 @@ type Dependencies(dependenciesFileName: string) =
             if not (File.Exists nuspecFile) then
                 failwithf "Specified file '%s' does not exist." nuspecFile
 
-        let directDeps =
+        let projectReferencedDeps =
             referencesFile.Groups
-            |> Seq.collect (fun kv -> kv.Value.NugetPackages)
-            |> Seq.map (fun i -> i.Name)
-            |> Set.ofSeq
+            |> Seq.collect (fun (KeyValue(group, packages)) -> packages.NugetPackages |> Seq.map (fun p -> group, p))
 
-        let mainGroupDesiredDepRanges =
-            depsFile.Groups.[GroupName MainGroup].Packages
-            |> List.map (fun p -> p.Name, p.VersionRequirement)
-            |> Map.ofList
+        let groupsForProjectReferencedDeps =
+            projectReferencedDeps
+            |> Seq.map (fun (grp, pkg) -> pkg.Name, grp)
+            |> Seq.groupBy fst
+            |> Seq.map (fun (key, items) -> key, (items |> Seq.map snd |> List.ofSeq))
+            |> Map.ofSeq
 
-        let lockFileMainGroupVersions =
-            directDeps
-            |> Seq.choose (fun p -> locked.Groups.[GroupName MainGroup].TryFind p)
-            |> Seq.map (fun p -> p.Name, p.Version)
+        let allDepsFilePackages =
+            depsFile.Groups
+            |> Seq.map (fun (KeyValue(g, p)) -> g, p.Packages)
+
+        let allDepsFilePackageRequirements =
+            allDepsFilePackages
+            |> Seq.collect (fun (group, packages) ->
+                let depsFileRanges = depsFile.Groups.[group].Packages |> List.map (fun p -> p.Name, p.VersionRequirement) |> Map.ofList
+                packages
+                |> Seq.choose (fun p ->
+                    match depsFileRanges.TryFind p.Name with
+                    | Some req -> Some ((group, p.Name), req)
+                    | None -> None
+                )
+            )
+            |> Map.ofSeq
+
+        let allLockFileResolvedVersions =
+            allDepsFilePackages
+            |> Seq.collect (fun (group, packages) ->
+                let lockGroup = locked.Groups.[group].Resolution
+                packages
+                |> Seq.choose (fun p ->
+                    lockGroup.TryFind p.Name
+                    |> Option.map (fun p -> (group, p.Name), p.Version)
+                )
+            )
             |> Map.ofSeq
 
         let lockedPackageVersionRequirements =
-            mainGroupDesiredDepRanges
-            |> Map.map (fun packageName versionRequirement ->
-                match lockFileMainGroupVersions |> Map.tryFind packageName with
-                | Some lockedVersion -> adjustRangeToLockedVersion versionRequirement lockedVersion
-                | None -> versionRequirement
+            projectReferencedDeps
+            |> Seq.map (fun (grp, pkg) -> grp, pkg.Name)
+            |> Seq.choose (fun groupAndPackage -> match allDepsFilePackageRequirements.TryFind groupAndPackage with | Some r -> Some(groupAndPackage, r) | None -> None)
+            |> Seq.map (fun (groupAndPackage, versionRequirement) ->
+                match allLockFileResolvedVersions |> Map.tryFind groupAndPackage with
+                | Some lockedVersion -> groupAndPackage, adjustRangeToLockedVersion versionRequirement lockedVersion
+                | None -> groupAndPackage, versionRequirement
             )
+            |> Map.ofSeq
+
+//        printfn "=====\ndirectDeps\n====="
+//        for (grp, pkg) in projectReferencedDeps do printfn "%A ==> %A" grp pkg.Name
+//        printfn ""
 
         let (|IndirectDependency|DirectDependency|UnknownDependency|) (p: PackageName) =
             if not (known.Contains p)
             then UnknownDependency
             else
-                if directDeps.Contains p
-                then DirectDependency
-                else IndirectDependency
+                match groupsForProjectReferencedDeps.TryFind p with
+                | None -> IndirectDependency
+                | Some [] -> IndirectDependency
+                | Some [group] -> DirectDependency (group, p)
+                | Some (firstGroup::_) -> DirectDependency (firstGroup, p)
 
-        let (|MatchesRange|NeedsRangeUpdate|LockRangeNotFound|) (packageName: PackageName, nuspecVersionRequirement: VersionRequirement) =
+//        printfn "=====\nlocked\n====="
+//        for dep in lockedPackageVersionRequirements do printfn "%O" dep
+//        printfn ""
 
-            match lockedPackageVersionRequirements.TryFind packageName with
+        let (|MatchesRange|NeedsRangeUpdate|LockRangeNotFound|) (groupAndPackage: (GroupName * PackageName), nuspecVersionRequirement: VersionRequirement) =
+
+            match lockedPackageVersionRequirements.TryFind groupAndPackage with
             | Some lockedFileRange ->
                 if lockedFileRange = nuspecVersionRequirement
                 then MatchesRange
@@ -947,16 +983,19 @@ type Dependencies(dependenciesFileName: string) =
                         | Some IndirectDependency ->
                             nodesToRemove.Add node |> ignore
                         | Some UnknownDependency -> ()
-                        | Some (DirectDependency as packName) ->
+                        | Some (DirectDependency ((GroupName(grp, _)) as g, (PackageName.PackageName(pkg, _) as p))) ->
                             match versionRange with
                             | Some versionRange ->
-                                match packName, versionRange with
+                                match (g, p), versionRange with
                                 | MatchesRange -> ()
                                 | LockRangeNotFound ->
-                                    raise (Exception(sprintf "Could not find version range for package %O" packName))
+                                    printfn "Couldn't find a version range for package '%s' in group '%s', is this package in your paket.dependencies file?" pkg grp
+                                    ()
                                 | NeedsRangeUpdate newVersionRange ->
                                     let nugetVersionRangeString = newVersionRange.FormatInNuGetSyntax()
                                     node.Attributes.["version"].InnerText <- nugetVersionRangeString
+                            | None ->
+                                ()
                         | None ->
                             raise (Exception(sprintf "Could not read dependency id for package node %O" node))
 
